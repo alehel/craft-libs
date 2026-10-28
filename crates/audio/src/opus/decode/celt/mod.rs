@@ -12,7 +12,7 @@ use bands::{anti_collapse, denormalise_bands, quant_all_bands, renormalise_vecto
 use energy::{unquant_coarse_energy, unquant_energy_finalise, unquant_fine_energy};
 use mdct::ImdctScratch;
 use rate::{Mode, compute_allocation};
-use tables::*;
+use tables::{COMB_GAINS, EBANDS, MAX_LM, NB_EBANDS, OVERLAP, PREEMPH, SHORT_MDCT, SPREAD_ICDF, TAPSET_ICDF, TF_SELECT_TABLE, TRIM_ICDF};
 
 use crate::opus::decode::range::{BITRES, RangeDecoder};
 
@@ -159,6 +159,7 @@ impl CeltDecoder {
         Ok(frame_size)
     }
 
+    #[allow(clippy::cognitive_complexity, reason = "the RFC 6716 CELT frame decode, ported as-is from FilmCraft")]
     fn decode_frame(&mut self, dec: &mut RangeDecoder, len: usize, n: usize, lm: usize) {
         let cc = self.channels;
         let c = self.stream_channels;

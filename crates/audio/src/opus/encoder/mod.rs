@@ -47,7 +47,7 @@ use range::{BITRES, RangeEncoder};
 use rate::{Mode as CeltMode, compute_allocation};
 use resample::Downsampler;
 use silk::SilkEncoder;
-use tables::*;
+use tables::{E_MEANS, EBANDS, NB_EBANDS, OVERLAP, PREEMPH, SPREAD_ICDF, TF_SELECT_TABLE, TRIM_ICDF};
 
 /// Samples per channel in one 20 ms frame at 48 kHz.
 const N: usize = 960;

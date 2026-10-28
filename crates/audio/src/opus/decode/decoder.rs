@@ -171,6 +171,7 @@ impl StreamDecoder {
     }
 
     /// `opus_decode_frame`: decodes one frame (or conceals when `data` is `None`/≤1 byte).
+    #[allow(clippy::cognitive_complexity, reason = "the RFC 6716 frame decoding sequence, ported as-is from FilmCraft")]
     fn decode_frame(&mut self, data: Option<&[u8]>, pcm: &mut [f32], frame_size: usize, fec: bool) -> Result<usize> {
         let ch = self.channels;
         let fs = self.rate as usize;

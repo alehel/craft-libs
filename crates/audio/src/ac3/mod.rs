@@ -856,6 +856,7 @@ impl Decoder {
         Ok(pcm)
     }
 
+    #[allow(clippy::cognitive_complexity, reason = "the A/52 audio block decode, ported as-is from FilmCraft")]
     #[allow(clippy::too_many_arguments)]
     fn audio_block(
         &mut self,

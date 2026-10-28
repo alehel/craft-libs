@@ -119,6 +119,7 @@ pub(crate) struct Bsi {
 }
 
 /// Read syncinfo and bsi (§E2.2.1-2), leaving `r` at the audio frame.
+#[allow(clippy::cognitive_complexity, reason = "the A/52 Annex E bit stream parse, ported as-is from FilmCraft")]
 pub(crate) fn read_bsi(r: &mut Bits) -> Result<Bsi> {
     r.skip(16); // syncword
     let strmtyp = r.read(2) as u8;

@@ -152,6 +152,7 @@ fn candidates(m: i32) -> &'static [u8] {
 }
 
 /// Quantise one channel at rate-distortion multiplier `lambda` and select sections.
+#[allow(clippy::cognitive_complexity, reason = "the AAC rate/distortion loop, ported as-is from FilmCraft")]
 pub fn quantise_channel(ch: &ChannelInput, lambda: f32) -> QuantChannel {
     let nb = ch.bands.len();
     let mut sf = vec![-1i32; nb];

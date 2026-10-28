@@ -6,7 +6,7 @@
 
 use crate::opus::encoder::range::RangeEncoder;
 use crate::opus::encoder::rate::MAX_FINE_BITS;
-use crate::opus::encoder::tables::*;
+use crate::opus::encoder::tables::{BETA_COEF, BETA_INTRA, E_PROB_MODEL, NB_EBANDS, PRED_COEF, SMALL_ENERGY_ICDF};
 
 const LAPLACE_MINP: u32 = 1;
 const LAPLACE_NMIN: u32 = 16;

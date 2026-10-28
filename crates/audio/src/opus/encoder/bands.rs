@@ -8,7 +8,7 @@
 
 use crate::opus::encoder::range::{BITRES, RangeEncoder, ilog};
 use crate::opus::encoder::rate::{Mode, QTHETA_OFFSET, get_pulses};
-use crate::opus::encoder::tables::*;
+use crate::opus::encoder::tables::{EBANDS, NB_EBANDS};
 
 pub const SPREAD_NORMAL: usize = 2;
 
