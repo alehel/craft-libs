@@ -148,6 +148,10 @@ impl Codec {
     }
 }
 
+/// The most header bytes kept for an Ogg FLAC stream that does not state its header count: room
+/// for the largest metadata block (2^24 bytes, such as a picture) twice over.
+const MAX_UNSTATED_HEADER_BYTES: usize = 32 << 20;
+
 /// Header packets of an Ogg FLAC stream, from its first packet (0x7F "FLAC", version, a 16-bit
 /// big-endian count of the header packets after it, then `fLaC` and STREAMINFO): that count plus
 /// the first. A count of 0 means unknown: the metadata packets then run to the one whose block
@@ -376,9 +380,23 @@ pub fn open(src: &(impl ByteSource + ?Sized)) -> Result<OggFile> {
             }
             if st.headers.len() < st.header_count && st.packets.is_empty() {
                 let data = read_parts(src, &pk.parts)?;
-                // FLAC with an unstated count: metadata packets run to the one flagged last.
-                if st.header_count == usize::MAX && !st.headers.is_empty() && data.first().is_some_and(|b| b & 0x80 != 0) {
-                    st.header_count = st.headers.len() + 1;
+                if st.header_count == usize::MAX && !st.headers.is_empty() {
+                    // FLAC with an unstated count: metadata packets run to the one flagged last. A
+                    // packet that is no metadata block (an audio frame starts with 0xFF) ends them,
+                    // and so does `MAX_UNSTATED_HEADER_BYTES`, so audio is never held as headers.
+                    let is_block = data.first().is_some_and(|b| b & 0x7F <= 6);
+                    let held: usize = st.headers.iter().map(Vec::len).sum();
+                    if !is_block || held.saturating_add(data.len()) > MAX_UNSTATED_HEADER_BYTES {
+                        if is_block {
+                            warnings.push(format!("stream {}: FLAC metadata beyond {} bytes read as audio", st.serial, MAX_UNSTATED_HEADER_BYTES));
+                        }
+                        st.header_count = st.headers.len();
+                        st.packets.push(pk);
+                        continue;
+                    }
+                    if data.first().is_some_and(|b| b & 0x80 != 0) {
+                        st.header_count = st.headers.len() + 1;
+                    }
                 }
                 st.headers.push(data);
             } else {

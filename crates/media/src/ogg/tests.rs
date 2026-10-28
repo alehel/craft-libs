@@ -226,6 +226,10 @@ fn flac_codec_params_carry_rate_channels_and_every_metadata_block() {
         assert_eq!(p.extradata.len(), 4 + 4 + 34 + 12);
         assert!(p.extradata.ends_with(b"craf"));
     }
+    // An unstated count and no block flagged last: the audio frame ends the headers, so the
+    // stream's audio is never held as header packets.
+    let ogg = open(&ogg_flac(0, false, 0x04)[..]).unwrap();
+    assert_eq!((ogg.streams[0].headers.len(), ogg.streams[0].packets.len()), (2, 1));
     // STREAMINFO alone, flagged last: the next packet is audio.
     let ogg = open(&ogg_flac(0, true, 0xFF)[..]).unwrap();
     assert_eq!((ogg.streams[0].headers.len(), ogg.streams[0].packets.len()), (1, 2));
