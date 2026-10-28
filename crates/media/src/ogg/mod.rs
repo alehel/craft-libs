@@ -203,6 +203,8 @@ pub struct Stream {
     pub saw_eos: bool,
     /// How many header packets precede the audio, once the first packet has said.
     header_count: usize,
+    /// The bytes of `headers`, kept as they are added.
+    header_bytes: usize,
 }
 
 impl Stream {
@@ -317,6 +319,7 @@ pub fn open(src: &(impl ByteSource + ?Sized)) -> Result<OggFile> {
                 last_granule: None,
                 saw_eos: false,
                 header_count: 1,
+                header_bytes: 0,
             });
             streams.len() - 1
         });
@@ -385,8 +388,7 @@ pub fn open(src: &(impl ByteSource + ?Sized)) -> Result<OggFile> {
                     // packet that is no metadata block (an audio frame starts with 0xFF) ends them,
                     // and so does `MAX_UNSTATED_HEADER_BYTES`, so audio is never held as headers.
                     let is_block = data.first().is_some_and(|b| b & 0x7F <= 6);
-                    let held: usize = st.headers.iter().map(Vec::len).sum();
-                    if !is_block || held.saturating_add(data.len()) > MAX_UNSTATED_HEADER_BYTES {
+                    if !is_block || st.header_bytes.saturating_add(data.len()) > MAX_UNSTATED_HEADER_BYTES {
                         if is_block {
                             warnings.push(format!("stream {}: FLAC metadata beyond {} bytes read as audio", st.serial, MAX_UNSTATED_HEADER_BYTES));
                         }
@@ -398,6 +400,7 @@ pub fn open(src: &(impl ByteSource + ?Sized)) -> Result<OggFile> {
                         st.header_count = st.headers.len() + 1;
                     }
                 }
+                st.header_bytes = st.header_bytes.saturating_add(data.len());
                 st.headers.push(data);
             } else {
                 st.packets.push(pk);

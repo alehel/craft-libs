@@ -230,6 +230,25 @@ fn flac_codec_params_carry_rate_channels_and_every_metadata_block() {
     // stream's audio is never held as header packets.
     let ogg = open(&ogg_flac(0, false, 0x04)[..]).unwrap();
     assert_eq!((ogg.streams[0].headers.len(), ogg.streams[0].packets.len()), (2, 1));
+    // Many tiny metadata packets under an unstated count: the size cap is kept as a running total,
+    // so opening stays linear in the packets (summing the kept headers per packet would not).
+    let mut file = Vec::new();
+    let head = {
+        let f = ogg_flac(0, false, 0x04);
+        open(&f[..]).unwrap().streams[0].headers[0].clone()
+    };
+    let (lacing, body) = lace(&[&head[..]], false);
+    page(&mut file, 2, 0, 9, 0, &lacing, &body);
+    let tiny = [0x04u8];
+    for seq in 1..=200u32 {
+        let packets: Vec<&[u8]> = vec![&tiny[..]; 250];
+        let (lacing, body) = lace(&packets, false);
+        page(&mut file, 0, 0, 9, seq, &lacing, &body);
+    }
+    let (lacing, body) = lace(&[&[0xFF, 0xF8, 0x69, 0x08, 0x00][..]], false);
+    page(&mut file, 4, 0, 9, 201, &lacing, &body);
+    let ogg = open(&file[..]).unwrap();
+    assert_eq!((ogg.streams[0].headers.len(), ogg.streams[0].packets.len()), (1 + 200 * 250, 1));
     // STREAMINFO alone, flagged last: the next packet is audio.
     let ogg = open(&ogg_flac(0, true, 0xFF)[..]).unwrap();
     assert_eq!((ogg.streams[0].headers.len(), ogg.streams[0].packets.len()), (1, 2));
