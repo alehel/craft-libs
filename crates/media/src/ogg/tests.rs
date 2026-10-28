@@ -189,25 +189,44 @@ fn opus_toc_durations() {
     assert_eq!(opus_packet_samples([0xF8, 0], 0), None);
 }
 
-#[test]
-fn flac_codec_params_carry_rate_and_channels() {
-    // 0x7F "FLAC" 1.0, one more header, then `fLaC`, a STREAMINFO block header and STREAMINFO:
-    // 44.1 kHz (0x0AC44), 6 channels (5 = channels less one), 24-bit.
-    let mut first = vec![0x7F, b'F', b'L', b'A', b'C', 1, 0, 0, 1];
+/// An Ogg FLAC file: the first packet (stating `count` more header packets), a VORBIS_COMMENT
+/// metadata packet (`comment_flags`: its block header byte), and one audio frame.
+fn ogg_flac(count: u16, streaminfo_last: bool, comment_flags: u8) -> Vec<u8> {
+    let mut first = vec![0x7F, b'F', b'L', b'A', b'C', 1, 0];
+    first.extend_from_slice(&count.to_be_bytes());
     first.extend_from_slice(b"fLaC");
-    first.extend_from_slice(&[0, 0, 0, 34]);
+    first.extend_from_slice(&[if streaminfo_last { 0x80 } else { 0 }, 0, 0, 34]);
     let mut info = vec![0x10, 0x00, 0x10, 0x00, 0, 0, 0, 0, 0, 0];
+    // 44.1 kHz (0x0AC44), 6 channels (5 = channels less one), 24-bit.
     let packed: u64 = (0x0AC44 << 44) | (5 << 41) | (23 << 36);
     info.extend_from_slice(&packed.to_be_bytes());
     info.extend_from_slice(&[0; 16]);
     first.extend_from_slice(&info);
-    let (lacing, body) = lace(&[&first], false);
+    let comment = [comment_flags, 0, 0, 8, 4, 0, 0, 0, b'c', b'r', b'a', b'f'];
+    let audio = [0xFF, 0xF8, 0x69, 0x08, 0x00];
     let mut file = Vec::new();
-    page(&mut file, 2, 0, 9, 0, &lacing, &body);
-    let (lacing, body) = lace(&[&[0x84, 0, 0, 0][..]], false);
-    page(&mut file, 4, 0, 9, 1, &lacing, &body);
-    let ogg = open(&file[..]).unwrap();
-    let p = ogg.streams[0].codec_params();
-    assert_eq!((p.codec, p.sample_rate, p.channels), (crate::CodecId::Flac, Some(44_100), Some(6)));
-    assert_eq!(&p.extradata[..4], b"fLaC");
+    for (i, (flags, packet)) in [(2u8, &first[..]), (0, &comment[..]), (4, &audio[..])].into_iter().enumerate() {
+        let (lacing, body) = lace(&[packet], false);
+        page(&mut file, flags, 0, 9, i as u32, &lacing, &body);
+    }
+    file
+}
+
+#[test]
+fn flac_codec_params_carry_rate_channels_and_every_metadata_block() {
+    // The count stated in the first packet, and an unstated count (0) ended by the last-block flag.
+    for file in [ogg_flac(1, false, 0x84), ogg_flac(0, false, 0x84)] {
+        let ogg = open(&file[..]).unwrap();
+        let s = &ogg.streams[0];
+        assert_eq!((s.headers.len(), s.packets.len()), (2, 1));
+        let p = s.codec_params();
+        assert_eq!((p.codec, p.sample_rate, p.channels), (crate::CodecId::Flac, Some(44_100), Some(6)));
+        // `fLaC`, STREAMINFO with its header, then the comment block.
+        assert_eq!(&p.extradata[..4], b"fLaC");
+        assert_eq!(p.extradata.len(), 4 + 4 + 34 + 12);
+        assert!(p.extradata.ends_with(b"craf"));
+    }
+    // STREAMINFO alone, flagged last: the next packet is audio.
+    let ogg = open(&ogg_flac(0, true, 0xFF)[..]).unwrap();
+    assert_eq!((ogg.streams[0].headers.len(), ogg.streams[0].packets.len()), (1, 2));
 }

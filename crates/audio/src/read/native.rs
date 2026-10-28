@@ -132,14 +132,15 @@ impl Packets<'_> {
             Packets::Mp4 { file, track, next, timescale, rate, .. } => {
                 let samples = file.tracks.get(*track).map(|t| t.samples.as_slice()).unwrap_or_default();
                 let first = samples.first().map_or(0, |s| s.dts);
-                let starts = samples.iter().map(|s| rescale(u64::try_from(s.dts - first).unwrap_or(0), u64::from(*timescale), u64::from(*rate)));
+                let starts =
+                    samples.iter().map(|s| rescale(u64::try_from(s.dts.saturating_sub(first)).unwrap_or(0), u64::from(*timescale), u64::from(*rate)));
                 let (i, s) = at_or_before(starts, frame);
                 *next = i;
                 Ok(s)
             }
             Packets::Ogg { next, starts, .. } => {
                 let base = starts.first().copied().unwrap_or(0);
-                let (i, s) = at_or_before(starts.iter().map(|&s| u64::try_from(s - base).unwrap_or(0)), frame);
+                let (i, s) = at_or_before(starts.iter().map(|&s| u64::try_from(s.saturating_sub(base)).unwrap_or(0)), frame);
                 *next = i;
                 Ok(s)
             }

@@ -115,7 +115,7 @@ impl Codec {
             Codec::Unknown
         }
     }
-    /// Header packets before the audio packets.
+    /// Header packets before the audio packets (for FLAC see [`flac_header_count`]).
     fn header_count(self) -> usize {
         match self {
             Codec::Opus => 2,
@@ -145,6 +145,18 @@ impl Codec {
             Codec::Speex => "Speex",
             Codec::Unknown => "unknown",
         }
+    }
+}
+
+/// Header packets of an Ogg FLAC stream, from its first packet (0x7F "FLAC", version, a 16-bit
+/// big-endian count of the header packets after it, then `fLaC` and STREAMINFO): that count plus
+/// the first. A count of 0 means unknown: the metadata packets then run to the one whose block
+/// header has the last-block flag, or end with STREAMINFO when its own flag is set.
+fn flac_header_count(first: &[u8]) -> usize {
+    match first.get(7..9).map(|b| u16::from_be_bytes([b[0], b[1]])) {
+        Some(n) if n > 0 => 1 + usize::from(n),
+        _ if first.get(13).is_some_and(|b| b & 0x80 != 0) => 1,
+        _ => usize::MAX,
     }
 }
 
@@ -185,6 +197,8 @@ pub struct Stream {
     pub last_granule: Option<i64>,
     /// An end-of-stream page was read.
     pub saw_eos: bool,
+    /// How many header packets precede the audio, once the first packet has said.
+    header_count: usize,
 }
 
 impl Stream {
@@ -298,6 +312,7 @@ pub fn open(src: &(impl ByteSource + ?Sized)) -> Result<OggFile> {
                 pages: 0,
                 last_granule: None,
                 saw_eos: false,
+                header_count: 1,
             });
             streams.len() - 1
         });
@@ -354,9 +369,18 @@ pub fn open(src: &(impl ByteSource + ?Sized)) -> Result<OggFile> {
             if st.headers.is_empty() && st.packets.is_empty() {
                 let data = read_parts(src, &pk.parts)?;
                 st.codec = Codec::of(&data);
+                st.header_count = match st.codec {
+                    Codec::Flac => flac_header_count(&data),
+                    c => c.header_count(),
+                };
             }
-            if st.headers.len() < st.codec.header_count() && st.packets.is_empty() {
-                st.headers.push(read_parts(src, &pk.parts)?);
+            if st.headers.len() < st.header_count && st.packets.is_empty() {
+                let data = read_parts(src, &pk.parts)?;
+                // FLAC with an unstated count: metadata packets run to the one flagged last.
+                if st.header_count == usize::MAX && !st.headers.is_empty() && data.first().is_some_and(|b| b & 0x80 != 0) {
+                    st.header_count = st.headers.len() + 1;
+                }
+                st.headers.push(data);
             } else {
                 st.packets.push(pk);
             }
