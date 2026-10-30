@@ -85,6 +85,59 @@ const CASES: &[Case] = &[
         min_snr: 120.0,
     },
     Case {
+        name: "mp2.mp2",
+        surround: false,
+        mono: false,
+        rate: 48_000,
+        args: &["-c:a", "mp2"],
+        container: Container::MpegAudio,
+        codec: CodecId::Mp2,
+        layout: ChannelLayout::STEREO,
+        channels: 2,
+        frames: None,
+        min_snr: 80.0,
+    },
+    // ffmpeg's default for mono MP2 is 384 kbit/s, which ISO/IEC 11172-3 does not allow.
+    Case {
+        name: "mp2-mono.mp2",
+        surround: false,
+        mono: true,
+        rate: 48_000,
+        args: &["-c:a", "mp2"],
+        container: Container::MpegAudio,
+        codec: CodecId::Mp2,
+        layout: ChannelLayout::MONO,
+        channels: 1,
+        frames: None,
+        min_snr: 80.0,
+    },
+    Case {
+        name: "mp2.mkv",
+        surround: false,
+        mono: false,
+        rate: 48_000,
+        args: &["-c:a", "mp2"],
+        container: Container::Matroska,
+        codec: CodecId::Mp2,
+        layout: ChannelLayout::STEREO,
+        channels: 2,
+        frames: Some(240_000),
+        min_snr: 80.0,
+    },
+    Case {
+        name: "mp2.mp4",
+        surround: false,
+        mono: false,
+        rate: 48_000,
+        args: &["-c:a", "mp2"],
+        container: Container::Mp4,
+        codec: CodecId::Mp2,
+        layout: ChannelLayout::STEREO,
+        channels: 2,
+        frames: Some(240_000),
+        min_snr: 80.0,
+    },
+    Case {
         name: "ac3.ac3",
         surround: false,
         mono: false,
@@ -384,7 +437,7 @@ fn track_decoder_on_demuxed_packets_matches_decode() {
     use craft_audio::TrackDecoder;
     use craft_media::isobmff;
     let ff = require_ffmpeg!();
-    for name in ["aac.m4a", "aac-5.1.m4a", "opus.mp4", "pcm-s24be.mov"] {
+    for name in ["aac.m4a", "aac-5.1.m4a", "mp2.mp4", "opus.mp4", "pcm-s24be.mov"] {
         let c = CASES.iter().find(|c| c.name == name).unwrap();
         let Some(path) = fixture(&ff, c) else { continue };
         let bytes = std::fs::read(&path).unwrap();

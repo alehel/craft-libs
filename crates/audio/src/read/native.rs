@@ -1,7 +1,7 @@
 //! The native decode path: craft-media's demuxers (ISO BMFF / QuickTime, Matroska / WebM, Ogg),
-//! raw ADTS and AC-3 streams, and WAV / AIFF PCM, feeding [`TrackDecoder`].
-//! [`Native::open`] answers `None` for a stream with no native codec (MP1/MP2/MP3, FLAC, ALAC,
-//! Vorbis, ...) or a container these demuxers do not read; the caller then uses symphonia.
+//! raw ADTS, MPEG audio and AC-3 streams, and WAV / AIFF PCM, feeding [`TrackDecoder`].
+//! [`Native::open`] answers `None` for a stream with no native codec (MP3, FLAC, ALAC, Vorbis,
+//! ...) or a container these demuxers do not read; the caller then uses symphonia.
 //!
 //! Every container is a [`Packets`] source over a [`Src`], read packet by packet, so a decode
 //! streams. Timing follows the containers: MP4 edit lists (AAC priming, Opus pre-skip), Matroska
@@ -13,7 +13,7 @@ use super::id3v2_len;
 use super::source::{Src, io_error};
 use super::wav::{self, WavParse};
 use crate::track::TrackDecoder;
-use crate::{AudioBuffer, AudioError, AudioInfo, CodecId, CodecParams, Container, PcmFormat, Result, aac, ac3};
+use crate::{AudioBuffer, AudioError, AudioInfo, CodecId, CodecParams, Container, PcmFormat, Result, aac, ac3, mpa};
 use craft_media::{isobmff, matroska, ogg};
 
 /// Corrupt packets tolerated before a stream that has produced nothing is an error.
@@ -303,8 +303,9 @@ impl<'a> Native<'a> {
             Some(c @ (Container::Mp4 | Container::QuickTime)) if head.get(4..8) == Some(b"ftyp") => open_mp4(src, c, track),
             Some(c @ (Container::Matroska | Container::WebM)) if body.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) => open_mkv(src, c, track),
             Some(Container::Adts) => single(open_adts(src).map(Ok)),
+            Some(Container::MpegAudio) => single(open_mpa(src).map(Ok)),
             Some(Container::Ac3) => single(open_ac3(src).map(Ok)),
-            None => single(open_ac3(src).or_else(|| open_adts(src)).map(Ok)),
+            None => single(open_ac3(src).or_else(|| open_adts(src)).or_else(|| open_mpa(src)).map(Ok)),
             _ => None,
         }
     }
@@ -612,6 +613,25 @@ fn open_adts<'a>(src: &Src<'a>) -> Option<Native<'a>> {
         n.frames_known = true;
     }
     Some(n)
+}
+
+/// A raw MPEG audio layer I or II stream.
+fn open_mpa<'a>(src: &Src<'a>) -> Option<Native<'a>> {
+    let head = src.head();
+    let frames = raw_frames(src, after_id3(&head) as u64, |rest| {
+        mpa::parse_header(rest).ok().filter(|h| h.layer == 1 || h.layer == 2).map(|h| (h.frame_bytes, h.samples() as u32))
+    })?;
+    let total = frames.iter().map(|&(_, _, f)| u64::from(f)).sum();
+    let lookahead = raw_lookahead(src, &frames, 1);
+    native(
+        Container::MpegAudio,
+        Packets::Raw { frames, src: src.clone(), next: 0 },
+        &CodecParams::new(CodecId::Mp2),
+        &lookahead,
+        0,
+        None,
+        Some(total),
+    )
 }
 
 /// A raw AC-3 or E-AC-3 stream; E-AC-3 dependent substreams decode to nothing and count no frames.
