@@ -27,7 +27,7 @@ struct Case {
     channels: usize,
     /// Presented frames, or `None` for a raw stream (as many as ffmpeg decodes).
     frames: Option<usize>,
-    /// Minimum SNR against ffmpeg.
+    /// Minimum SNR against ffmpeg (AC-3 is limited by decoder-specific dither, §7.3.4).
     min_snr: f64,
 }
 
@@ -83,6 +83,71 @@ const CASES: &[Case] = &[
         channels: 2,
         frames: Some(240_000),
         min_snr: 120.0,
+    },
+    Case {
+        name: "ac3.ac3",
+        surround: false,
+        mono: false,
+        rate: 48_000,
+        args: &["-c:a", "ac3", "-b:a", "192k"],
+        container: Container::Ac3,
+        codec: CodecId::Ac3,
+        layout: ChannelLayout::STEREO,
+        channels: 2,
+        frames: None,
+        min_snr: 25.0,
+    },
+    Case {
+        name: "ac3-5.1.ac3",
+        surround: true,
+        mono: false,
+        rate: 48_000,
+        args: &["-c:a", "ac3", "-b:a", "448k"],
+        container: Container::Ac3,
+        codec: CodecId::Ac3,
+        layout: ChannelLayout::SURROUND_5_1_SIDE,
+        channels: 6,
+        frames: None,
+        min_snr: 25.0,
+    },
+    Case {
+        name: "eac3.eac3",
+        surround: false,
+        mono: false,
+        rate: 48_000,
+        args: &["-c:a", "eac3", "-b:a", "192k"],
+        container: Container::Ac3,
+        codec: CodecId::Eac3,
+        layout: ChannelLayout::STEREO,
+        channels: 2,
+        frames: None,
+        min_snr: 25.0,
+    },
+    Case {
+        name: "ac3.mp4",
+        surround: false,
+        mono: false,
+        rate: 48_000,
+        args: &["-c:a", "ac3"],
+        container: Container::Mp4,
+        codec: CodecId::Ac3,
+        layout: ChannelLayout::STEREO,
+        channels: 2,
+        frames: Some(240_000),
+        min_snr: 25.0,
+    },
+    Case {
+        name: "eac3-5.1.mkv",
+        surround: true,
+        mono: false,
+        rate: 48_000,
+        args: &["-c:a", "eac3"],
+        container: Container::Matroska,
+        codec: CodecId::Eac3,
+        layout: ChannelLayout::SURROUND_5_1_SIDE,
+        channels: 6,
+        frames: Some(240_000),
+        min_snr: 25.0,
     },
     Case {
         name: "opus.opus",
@@ -305,8 +370,8 @@ fn streaming_and_seeking_match_the_whole_file_decode() {
             assert_eq!(after[0].len(), whole.frames() - target, "{}: frames after a seek to {target}", c.name);
             let expected: Vec<Vec<f32>> = whole.channels.iter().map(|ch| ch[target..].to_vec()).collect();
             let s = snr_planar(&after, &expected);
-            // Opus rebuilds its predictor state from the pre-roll.
-            let bound = if c.codec == CodecId::Opus { c.min_snr.min(25.0) } else { f64::INFINITY };
+            // Opus rebuilds its predictor state from the pre-roll; AC-3 dither is random per decode.
+            let bound = if matches!(c.codec, CodecId::Opus | CodecId::Ac3 | CodecId::Eac3) { c.min_snr.min(25.0) } else { f64::INFINITY };
             assert!(s >= bound, "{}: SNR {s:.1} dB after a seek to {target}", c.name);
         }
     }
