@@ -1,6 +1,7 @@
 //! `craft_audio::decode` routes each container and codec to the home-grown demuxers and
-//! decoders: every pair decodes, sample-aligned, to its presentation length, within an SNR of
-//! ffmpeg's decode; truncated and corrupted copies never panic. Fixtures are written by ffmpeg
+//! decoders: every pair decodes, sample-aligned, to its presentation length (edit lists, Matroska
+//! `CodecDelay` and `DiscardPadding` applied), within an SNR
+//! of ffmpeg's decode; truncated and corrupted copies never panic. Fixtures are written by ffmpeg
 //! (skipped without it).
 
 use craft_audio::{ChannelLayout, CodecId, Container, decode, probe};
@@ -31,6 +32,58 @@ struct Case {
 }
 
 const CASES: &[Case] = &[
+    Case {
+        name: "aac.aac",
+        surround: false,
+        mono: false,
+        rate: 48_000,
+        args: &["-c:a", "aac", "-b:a", "128k", "-aac_pns", "0"],
+        container: Container::Adts,
+        codec: CodecId::Aac,
+        layout: ChannelLayout::STEREO,
+        channels: 2,
+        frames: None,
+        min_snr: 120.0,
+    },
+    Case {
+        name: "aac.m4a",
+        surround: false,
+        mono: false,
+        rate: 44_100,
+        args: &["-c:a", "aac", "-b:a", "128k", "-aac_pns", "0"],
+        container: Container::Mp4,
+        codec: CodecId::Aac,
+        layout: ChannelLayout::STEREO,
+        channels: 2,
+        frames: Some(220_500),
+        min_snr: 120.0,
+    },
+    Case {
+        name: "aac-5.1.m4a",
+        surround: true,
+        mono: false,
+        rate: 48_000,
+        args: &["-c:a", "aac", "-b:a", "384k", "-aac_pns", "0"],
+        container: Container::Mp4,
+        codec: CodecId::Aac,
+        layout: ChannelLayout::SURROUND_5_1_SIDE,
+        channels: 6,
+        frames: Some(240_000),
+        min_snr: 120.0,
+    },
+    Case {
+        name: "aac.mkv",
+        surround: false,
+        mono: false,
+        rate: 48_000,
+        args: &["-c:a", "aac", "-b:a", "128k", "-aac_pns", "0"],
+        container: Container::Matroska,
+        codec: CodecId::Aac,
+        layout: ChannelLayout::STEREO,
+        channels: 2,
+        frames: Some(240_000),
+        min_snr: 120.0,
+    },
     Case {
         name: "pcm-s24be.mov",
         surround: false,
@@ -212,7 +265,7 @@ fn track_decoder_on_demuxed_packets_matches_decode() {
     use craft_audio::TrackDecoder;
     use craft_media::isobmff;
     let ff = require_ffmpeg!();
-    for name in ["pcm-s24be.mov"] {
+    for name in ["aac.m4a", "aac-5.1.m4a", "pcm-s24be.mov"] {
         let c = CASES.iter().find(|c| c.name == name).unwrap();
         let Some(path) = fixture(&ff, c) else { continue };
         let bytes = std::fs::read(&path).unwrap();
@@ -244,8 +297,8 @@ fn track_decoder_on_demuxed_packets_matches_decode() {
 fn track_choice_and_the_sample_limit() {
     use craft_audio::{AudioError, DecodeOptions, decode_with, tracks};
     let ff = require_ffmpeg!();
-    for ext in ["mkv", "mov"] {
-        let out = crate::testkit::fixtures_dir("routing").join(format!("two-tracks-pcm.{ext}"));
+    for ext in ["mkv", "mp4"] {
+        let out = crate::testkit::fixtures_dir("routing").join(format!("two-tracks.{ext}"));
         let Some(path) = crate::testkit::fixtures::generate(&out, |tmp| {
             let tmp = tmp.to_string_lossy();
             run(
@@ -264,7 +317,9 @@ fn track_choice_and_the_sample_limit() {
                     "-map",
                     "1:a",
                     "-c:a",
-                    "pcm_s16le",
+                    "aac",
+                    "-b:a",
+                    "96k",
                     &tmp,
                 ],
             )
@@ -274,7 +329,7 @@ fn track_choice_and_the_sample_limit() {
         let bytes = std::fs::read(&path).unwrap();
         let list = tracks(&bytes, None).unwrap();
         assert_eq!(list.len(), 2, "{ext}");
-        assert_eq!((list[0].codec, list[0].sample_rate, list[0].channels), (CodecId::Pcm, Some(48_000), Some(1)), "{ext}");
+        assert_eq!((list[0].codec, list[0].sample_rate, list[0].channels), (CodecId::Aac, Some(48_000), Some(1)), "{ext}");
         assert_eq!((list[1].sample_rate, list[1].channels), (Some(44_100), Some(2)), "{ext}");
         let (first, _) = decode_with(&bytes, None, &DecodeOptions::default()).unwrap();
         let (second, buf) = decode_with(&bytes, None, &DecodeOptions::default().with_track(1)).unwrap();
@@ -293,7 +348,7 @@ fn track_choice_and_the_sample_limit() {
 fn decoder_reads_from_a_file() {
     use craft_audio::{DecodeOptions, Decoder};
     let ff = require_ffmpeg!();
-    let c = CASES.iter().find(|c| c.name == "pcm-s24be.mov").unwrap();
+    let c = CASES.iter().find(|c| c.name == "aac.m4a").unwrap();
     let Some(path) = fixture(&ff, c) else { return };
     let (_, whole) = decode(&std::fs::read(&path).unwrap(), None).unwrap();
     let mut d = Decoder::open(std::fs::File::open(&path).unwrap(), None, &DecodeOptions::default()).unwrap();
