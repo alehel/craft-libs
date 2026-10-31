@@ -148,10 +148,20 @@ impl Track {
         self.entries.first().map(|e| &e.codec)
     }
 
-    /// What a decoder needs for this track, in the container-neutral form the codec crates take;
-    /// [`crate::CodecId::Unknown`] without a sample entry.
+    /// What a decoder needs for this track, in the container-neutral form the codec crates take:
+    /// [`Track::codec_params_for`] the first sample's description (the first entry for a track
+    /// without samples, or when that index names no entry). A track whose samples use more than
+    /// one description ([`Track::has_mixed_descriptions`]) needs `codec_params_for` per sample.
     pub fn codec_params(&self) -> crate::CodecParams {
-        let Some(entry) = self.entries.first() else {
+        let first = self.samples.first().map(|s| s.description_index);
+        self.codec_params_for(first.filter(|&i| i >= 1 && i as usize <= self.entries.len()).unwrap_or(1))
+    }
+
+    /// What a decoder needs for the samples whose [`Sample::description_index`] is
+    /// `description_index` (1-based, into [`Track::entries`]); [`crate::CodecId::Unknown`] when
+    /// there is no such entry.
+    pub fn codec_params_for(&self, description_index: u32) -> crate::CodecParams {
+        let Some(entry) = description_index.checked_sub(1).and_then(|i| self.entries.get(i as usize)) else {
             return crate::CodecParams::new(crate::CodecId::Unknown);
         };
         let codec = &entry.codec;
@@ -159,7 +169,7 @@ impl Track {
         if let Some(v) = &entry.video {
             p = p.with_size(u32::from(v.width), u32::from(v.height));
         }
-        if let Some(a) = self.audio() {
+        if let Some(a) = &entry.audio {
             p = p.with_sample_rate(a.sample_rate.round() as u32).with_channels(u16::try_from(a.channels).unwrap_or(0));
         }
         match codec {
@@ -175,6 +185,12 @@ impl Track {
             _ => {}
         }
         p
+    }
+
+    /// True when the samples use more than one sample description, so no single
+    /// [`Track::codec_params`] describes them all.
+    pub fn has_mixed_descriptions(&self) -> bool {
+        self.samples.windows(2).any(|w| w[0].description_index != w[1].description_index)
     }
     pub fn video(&self) -> Option<&crate::isobmff::codec::VideoParams> {
         self.entries.first().and_then(|e| e.video.as_ref())
@@ -1109,6 +1125,34 @@ mod tests {
         assert_eq!(c.take(3), 10 + 5 + 5);
         assert_eq!(c.next_value(), 5);
         assert_eq!(c.next_value(), 0);
+    }
+
+    #[test]
+    fn codec_params_follow_the_sample_description() {
+        use crate::isobmff::codec::SampleEntry;
+        use crate::isobmff::mux::{Brand, Mp4Writer, TrackConfig, WriteSample, WriterOptions};
+        let mut w = Mp4Writer::new(std::io::Cursor::new(Vec::new()), WriterOptions::new(Brand::Mp4)).unwrap();
+        let a = w.add_track(TrackConfig::new(SampleEntry::aac(vec![0x12, 0x10], 2, 48_000), 48_000)).unwrap();
+        for _ in 0..2 {
+            w.write_sample(a, WriteSample { data: &[0; 8], duration: 1024, composition_offset: 0, is_sync: true }).unwrap();
+        }
+        let out = w.finish().unwrap().into_inner();
+        let mut t = open(out.as_slice()).unwrap().tracks.remove(0);
+        assert!(!t.has_mixed_descriptions());
+        assert_eq!(t.codec_params(), t.codec_params_for(1));
+        // entry 1 unused, every sample on entry 2 (a 44.1 kHz mono AudioSpecificConfig)
+        t.entries.push(SampleEntry::aac(vec![0x12, 0x08], 1, 44_100));
+        t.samples.iter_mut().for_each(|s| s.description_index = 2);
+        let p = t.codec_params();
+        assert_eq!((p.extradata.as_slice(), p.sample_rate, p.channels), (&[0x12, 0x08][..], Some(44_100), Some(1)));
+        assert_eq!(t.codec_params_for(1).extradata, [0x12, 0x10]);
+        assert_eq!(t.codec_params_for(0).codec, crate::CodecId::Unknown);
+        assert_eq!(t.codec_params_for(3).codec, crate::CodecId::Unknown);
+        assert!(!t.has_mixed_descriptions());
+        t.samples[1].description_index = 1;
+        assert!(t.has_mixed_descriptions());
+        t.samples[0].description_index = 0; // malformed: falls back to the first entry
+        assert_eq!(t.codec_params().extradata, [0x12, 0x10]);
     }
 
     #[test]

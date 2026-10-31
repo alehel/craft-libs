@@ -111,7 +111,9 @@ Other differences:
   `craft_media::ByteSource` (with `ReadSeekSource`, which was Matroska's). A type FilmCraft
   implements both traits for keeps one of its two impls.
 - `isobmff::Track` and `matroska::Track` have `codec_params()`, both returning a
-  `CodecParams` (`CodecId::Unknown` for a codec without an identifier);
+  `CodecParams` (`CodecId::Unknown` for a codec without an identifier). The MP4 one describes
+  the first sample's sample description; `codec_params_for(description_index)` gives any other,
+  and `has_mixed_descriptions()` says whether the samples use more than one.
   `isobmff::CodecConfig` has `codec_id()` and `extradata()`, and `OpusConfig::opus_head()`.
 
 ## `bitstream`
