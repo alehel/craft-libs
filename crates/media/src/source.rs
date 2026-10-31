@@ -137,9 +137,15 @@ impl<R: Read + Seek> ByteSource for ReadSeekSource<R> {
         if offset.checked_add(buf.len() as u64).is_none_or(|e| e > self.len) {
             return Err(eof());
         }
-        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut g = self.inner.lock().unwrap_or_else(|e| {
+            // a read panicked in another thread and may have moved the reader; force a seek
+            let mut g = e.into_inner();
+            g.1 = u64::MAX;
+            g
+        });
         let (r, pos) = &mut *g;
         if *pos != offset {
+            *pos = u64::MAX; // unknown until the seek succeeds
             r.seek(SeekFrom::Start(offset))?;
             *pos = offset;
         }
@@ -182,6 +188,33 @@ mod tests {
         assert_eq!(ByteSource::len(&a), 4);
         let s: &[u8] = &v;
         assert_eq!(ByteSource::len(&s), 4);
+    }
+
+    #[test]
+    fn read_seek_source_seeks_after_a_panicked_read() {
+        struct PanicOnce(io::Cursor<Vec<u8>>, bool);
+        impl Read for PanicOnce {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                let n = self.0.read(&mut buf[..1])?;
+                if std::mem::take(&mut self.1) {
+                    panic!("read failed halfway");
+                }
+                Ok(n)
+            }
+        }
+        impl Seek for PanicOnce {
+            fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
+                self.0.seek(to)
+            }
+        }
+        let r = ReadSeekSource::new(PanicOnce(io::Cursor::new(vec![1, 2, 3, 4]), false)).unwrap();
+        let mut b = [0u8; 2];
+        r.read_at(0, &mut b).unwrap();
+        r.inner.lock().unwrap().0.1 = true;
+        // the reader moves one byte, then panics with the tracked position at 2
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| r.read_at(2, &mut b))).is_err());
+        r.read_at(2, &mut b).unwrap();
+        assert_eq!(b, [3, 4]);
     }
 
     #[test]

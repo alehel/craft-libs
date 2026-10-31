@@ -242,7 +242,7 @@ impl CodecConfig {
             CodecConfig::Hevc(c) => c.to_bytes(),
             CodecConfig::Av1(c) => c.to_bytes(),
             CodecConfig::Vp9(c) => c.to_bytes(),
-            CodecConfig::Apv(c) => c.to_bytes(),
+            CodecConfig::Apv(c) => c.record_bytes(),
             CodecConfig::Aac(a) => a.asc.clone(),
             CodecConfig::Alac { cookie } => cookie.clone(),
             CodecConfig::Opus(o) => o.opus_head(),
@@ -870,12 +870,15 @@ impl ApvConfig {
 
     /// Serialize the full `apvC` box payload (4-byte `FullBox` header + `APVDecoderConfigurationRecord`).
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut b = BoxBuf::new();
-        b.u32(0); // FullBox version = 0, flags = 0
+        [&[0u8; 4][..], &self.record_bytes()].concat() // FullBox version = 0, flags = 0
+    }
+
+    /// Serialize the bare `APVDecoderConfigurationRecord` (Matroska's `CodecPrivate` for `V_APV`).
+    pub fn record_bytes(&self) -> Vec<u8> {
         if !self.raw_record.is_empty() {
-            b.bytes(&self.raw_record);
-            return b.buf;
+            return self.raw_record.clone();
         }
+        let mut b = BoxBuf::new();
         b.u8(1); // configurationVersion = 1
         b.u8(1); // number_of_configuration_entry = 1
         b.u8(1); // pbu_type = 1 (primary frame)
@@ -1926,5 +1929,27 @@ mod params_tests {
         let stereo = OpusConfig { output_channels: 2, channel_mapping_family: 0, channel_mapping: vec![9, 9], ..o };
         assert_eq!(stereo.opus_head().len(), 19);
         assert_eq!(CodecConfig::Opus(stereo).codec_id(), CodecId::Opus);
+    }
+
+    #[test]
+    fn apv_extradata_is_the_bare_record() {
+        let cfg = ApvConfig {
+            profile_idc: 33,
+            level_idc: 60,
+            frame_width: 1920,
+            frame_height: 1080,
+            chroma_format_idc: 2,
+            bit_depth_minus8: 2,
+            ..Default::default()
+        };
+        let record = cfg.record_bytes();
+        assert_eq!(record[0], 1, "configurationVersion");
+        assert_eq!(cfg.to_bytes(), [&[0u8; 4][..], &record].concat());
+        // Matroska's V_APV CodecPrivate carries the record as is; an MP4 track must match it
+        let parsed = ApvConfig::parse(&cfg.to_bytes()).unwrap();
+        assert_eq!(parsed.raw_record, record);
+        assert_eq!(CodecConfig::Apv(parsed.clone()).extradata(), record);
+        assert_eq!(parsed.to_bytes(), cfg.to_bytes());
+        assert_eq!(CodecConfig::Apv(cfg).extradata(), record);
     }
 }
