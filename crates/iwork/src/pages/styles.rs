@@ -21,8 +21,9 @@ const FALLBACK_SIZE: f32 = 12.0;
 
 /// Sizes outside this range, in points, are ignored.
 const SIZES: std::ops::RangeInclusive<f32> = 0.5..=4000.0;
-/// Indents, spacing and tab positions beyond this many points either way are ignored.
-const MAX_LENGTH: f32 = 31_680.0;
+/// Indents, spacing, line heights and tab positions beyond this many points either way (22 inches,
+/// wider than any page) are ignored: one larger would put its text off the page.
+const MAX_LENGTH: f32 = 1584.0;
 
 /// The styles of one document, with what has been worked out from them so far.
 pub(super) struct Styles<'p> {
@@ -81,8 +82,10 @@ impl<'p> Styles<'p> {
 
 /// Property `field` of property group `group` (11 character, 12 paragraph), from the first
 /// style in `chain` that sets it, read by `read`.
+/// A value `read` refuses (out of range, the wrong type) counts as not set, so the style's parent
+/// decides.
 fn first<'p, T>(chain: &[Message<'p>], group: u32, field: u32, read: impl Fn(Message<'p>) -> Option<T>) -> Option<T> {
-    chain.iter().filter_map(|s| s.message(group)).find(|g| g.has(field)).and_then(read)
+    chain.iter().filter_map(|s| s.message(group)).filter(|g| g.has(field)).find_map(read)
 }
 
 fn flag(chain: &[Message<'_>], field: u32) -> Option<bool> {
@@ -90,11 +93,11 @@ fn flag(chain: &[Message<'_>], field: u32) -> Option<bool> {
 }
 
 fn length(chain: &[Message<'_>], group: u32, field: u32) -> Option<f32> {
-    first(chain, group, field, |g| g.float(field)).filter(|v| v.is_finite() && v.abs() <= MAX_LENGTH)
+    first(chain, group, field, |g| g.float(field).filter(|v| v.is_finite() && v.abs() <= MAX_LENGTH))
 }
 
 fn resolve_char(chain: &[Message<'_>]) -> CharProps {
-    let size = first(chain, 11, 3, |g| g.float(3)).filter(|s| SIZES.contains(s)).unwrap_or(FALLBACK_SIZE);
+    let size = first(chain, 11, 3, |g| g.float(3).filter(|s| SIZES.contains(s))).unwrap_or(FALLBACK_SIZE);
     let (caps, small_caps) = match first(chain, 11, 13, |g| g.varint(13)) {
         Some(1) => (Some(true), Some(false)),
         Some(2) => (Some(false), Some(true)),
@@ -118,7 +121,7 @@ fn resolve_char(chain: &[Message<'_>]) -> CharProps {
         small_caps,
         position: length(chain, 11, 14).filter(|v| *v != 0.0),
         // A fraction of the font size.
-        spacing: first(chain, 11, 27, |g| g.float(27)).filter(|v| v.is_finite() && v.abs() <= 10.0 && *v != 0.0).map(|v| v * size),
+        spacing: first(chain, 11, 27, |g| g.float(27).filter(|v| v.is_finite() && v.abs() <= 10.0)).filter(|v| *v != 0.0).map(|v| v * size),
         ..CharProps::default()
     }
 }

@@ -88,6 +88,16 @@ fn breaks_become_the_model_s_breaks() {
 }
 
 #[test]
+fn a_value_out_of_range_leaves_the_property_to_the_parent_style() {
+    // A size of 99999 and a first-line indent far off the page, over a 20-point parent.
+    let parent = style(380, PARA_STYLE, Some(BODY_STYLE), Msg::new().float(3, 20.0), Msg::new().float(7, 10.0));
+    let odd = style(381, PARA_STYLE, Some(380), Msg::new().float(3, 99999.0), Msg::new().float(7, -20000.0));
+    let imported = import(&document(body("x", &[(0, Some(381))], &[]), vec![parent, odd])).unwrap();
+    let p = paragraphs(&imported)[0];
+    assert_eq!((p.runs[0].props.size, p.props.indent_first), (Some(20.0), Some(10.0)));
+}
+
+#[test]
 fn first_line_indents_are_measured_from_the_left_indent() {
     // Pages: first line 36 points from the margin, other lines 18.
     let indented = style(340, PARA_STYLE, Some(BODY_STYLE), Msg::new(), Msg::new().float(7, 36.0).float(11, 18.0).float(19, 9.0));
