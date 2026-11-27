@@ -217,13 +217,14 @@ fn resolve_para(chain: &[Message<'_>]) -> ParaProps {
     }
 }
 
-/// Line spacing: field 1 the kind (absent a multiple of lines, 1 at least, 2 exactly, 4 between
-/// lines, in points) and field 2 the amount. Spacing between lines has no counterpart in the
-/// model and is left at single.
+/// Line spacing: field 1 the kind (absent or 0 a multiple of lines, 1 at least, 2 exactly,
+/// 4 between lines, in points) and field 2 the amount. styles.md lists a multiple as an absent
+/// kind; experiment 0321 wrote 0 and Pages doubled the line height. Spacing between lines has no
+/// counterpart in the model and is left at single.
 fn line_spacing(m: Message<'_>) -> Option<LineSpacing> {
     let amount = m.float(2).filter(|v| v.is_finite() && *v > 0.0 && *v <= MAX_LENGTH)?;
     match m.varint(1) {
-        None => Some(LineSpacing::Multiple(amount.min(100.0))),
+        None | Some(0) => Some(LineSpacing::Multiple(amount.min(100.0))),
         Some(1) => Some(LineSpacing::AtLeast(amount)),
         Some(2) => Some(LineSpacing::Exactly(amount)),
         Some(_) => None,

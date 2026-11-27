@@ -1,7 +1,7 @@
 use craft_iwork::Error;
 use craft_iwork::pages::{Imported, import};
 use craft_wordmodel::para::{COLUMN_BREAK, LINE_BREAK};
-use craft_wordmodel::props::VertAlign;
+use craft_wordmodel::props::{LineSpacing, VertAlign};
 use craft_wordmodel::{Align, Paragraph, Rgb, TextColor};
 
 use crate::build::pages::{BODY_STYLE, CHAR_STYLE, PARA_STYLE, body, document, style};
@@ -94,6 +94,31 @@ fn first_line_indents_are_measured_from_the_left_indent() {
     let imported = import(&document(body("x", &[(0, Some(340))], &[]), vec![indented])).unwrap();
     let p = &paragraphs(&imported)[0].props;
     assert_eq!((p.indent_left, p.indent_first, p.indent_right), (Some(18.0), Some(18.0), Some(9.0)));
+}
+
+#[test]
+fn line_spacing_kinds_are_read_with_an_explicit_kind_0_as_a_multiple() {
+    let spacing = |kind: Option<u64>, amount: f32| {
+        let m = Msg::new().float(2, amount);
+        Msg::new().msg(
+            13,
+            match kind {
+                Some(k) => m.varint(1, k),
+                None => m,
+            },
+        )
+    };
+    let styles: Vec<_> = [(370, None, 1.5), (371, Some(0), 2.0), (372, Some(2), 30.0), (373, Some(1), 14.0)]
+        .iter()
+        .map(|&(id, kind, amount)| style(id, PARA_STYLE, Some(BODY_STYLE), Msg::new(), spacing(kind, amount)))
+        .collect();
+    let paras: Vec<_> = (0..4).map(|i| (i * 2, Some(370 + i))).collect();
+    let imported = import(&document(body("a\nb\nc\nd", &paras, &[]), styles)).unwrap();
+    let got: Vec<_> = paragraphs(&imported).iter().map(|p| p.props.line_spacing).collect();
+    assert_eq!(
+        got,
+        [Some(LineSpacing::Multiple(1.5)), Some(LineSpacing::Multiple(2.0)), Some(LineSpacing::Exactly(30.0)), Some(LineSpacing::AtLeast(14.0))]
+    );
 }
 
 #[test]
