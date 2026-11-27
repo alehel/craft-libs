@@ -3160,6 +3160,16 @@ name = "craft-ipp"
 version = "0.1.0"
 
 [[package]]
+name = "craft-iwork"
+version = "0.1.0"
+dependencies = [
+ "craft-wordmodel",
+ "craft-zip",
+ "proptest",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "craft-java-class"
 version = "0.1.0"
 dependencies = [

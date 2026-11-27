@@ -1,0 +1,27 @@
+[package]
+name = "craft-iwork"
+description = "Documents saved by Pages, Keynote and Numbers: the ZIP package, its Snappy-compressed object parts, their records and payloads, read from untrusted files; with `pages`, a Pages document's body text, formatting and page setup as a craft-wordmodel Document."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+craft-zip = { workspace = true }
+thiserror = { workspace = true }
+
+[dependencies.craft-wordmodel]
+workspace = true
+optional = true
+
+[features]
+# Pages documents: the body text, its character and paragraph formatting and the page setup, read
+# into a craft-wordmodel Document.
+pages = ["dep:craft-wordmodel"]
+
+[dev-dependencies]
+proptest = "1"
