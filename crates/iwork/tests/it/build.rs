@@ -155,10 +155,16 @@ pub mod pages {
 
     /// A document root naming the body, with an A4 page and 2 cm margins.
     pub fn root() -> Record {
+        root_and(Msg::new())
+    }
+
+    /// [`root`] with the fields of `more` after its own.
+    pub fn root_and(more: Msg) -> Record {
         let mut m = Msg::new().reference(4, BODY);
         for (field, v) in [(30, 595.28), (31, 841.89), (32, 56.7), (33, 56.7), (34, 56.7), (35, 56.7)] {
             m = m.float(field, v);
         }
+        m.0.extend_from_slice(&more.0);
         record(ROOT, 10000, m)
     }
 

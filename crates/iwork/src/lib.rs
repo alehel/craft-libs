@@ -8,10 +8,14 @@
 //! - container.md: "The package" (ZIP files, and the folder form zipped whole with its
 //!   `Index.zip`), "Chunks", "Records" and, for password-protected documents, telling them
 //!   apart ("Password protection"; they aren't decrypted yet);
+//! - container.md "Data files" ([`DataFiles`]): the files in `Data/`, found by data ID through
+//!   the package metadata;
 //! - with the `pages` feature ([`pages`]): text.md "The body text", "Paragraphs", "Positions in
-//!   the text" and "Runs" (paragraph styles, character styles, tracked deletions); styles.md
-//!   "Character properties", "Paragraph properties", "Named and unnamed styles" and "Finding a
-//!   character's formatting"; pages.md "Page setup".
+//!   the text" and "Runs" (paragraph styles, character styles, attachments, links and bookmarks,
+//!   columns, sections, drop caps, tracked deletions); styles.md "Character properties",
+//!   "Paragraph properties" (borders among them), "Named and unnamed styles" and "Finding a
+//!   character's formatting"; pages.md "Page setup" and the sections' page colour; drawables.md
+//!   "On the page or in the text", "Geometry" and "Images".
 //!
 //! Every file is treated as hostile: sizes are checked before anything is allocated, decoded
 //! bytes and records are counted against [`Limits`], and nothing panics. A part that is damaged
@@ -21,6 +25,7 @@
 //! endorsed by Apple.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable, clippy::indexing_slicing)]
 
+mod data;
 mod iwa;
 mod package;
 #[cfg(feature = "pages")]
@@ -28,6 +33,7 @@ pub mod pages;
 mod snappy;
 pub mod wire;
 
+pub use data::DataFiles;
 pub use package::{Damage, Object, Package};
 
 /// What reading a document may use, whatever the file declares.

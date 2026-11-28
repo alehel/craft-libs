@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use craft_wordmodel::props::{LineSpacing, TabAlign, TabLeader, TabStop, Underline, VertAlign};
+use craft_wordmodel::props::{Border, BorderStyle, Borders, LineSpacing, TabAlign, TabLeader, TabStop, Underline, VertAlign};
 use craft_wordmodel::{Align, CharProps, ParaProps, Rgb, TextColor};
 
 use crate::Package;
@@ -14,6 +14,15 @@ const MAX_CHAIN: usize = 64;
 /// The types of character and paragraph styles.
 const CHAR_STYLE: u32 = 2021;
 const PARA_STYLE: u32 = 2022;
+/// The type of a column style.
+const COLUMN_STYLE: u32 = 2024;
+/// The most columns Pages lays out.
+const MAX_COLUMNS: u64 = 10;
+/// The widest border line read, in points.
+const MAX_BORDER_WIDTH: f32 = 100.0;
+/// How far a paragraph border is from the text, in points. Pages doesn't store it; 6 points is
+/// what it offers when a border is turned on (experiment 0262).
+const BORDER_OFFSET: f32 = 6.0;
 
 /// The size a run gets when no style sets one: Pages' fallback when a paragraph has no style
 /// (text.md, "Runs", field 5).
@@ -39,7 +48,7 @@ impl<'p> Styles<'p> {
 
     /// The style `id`, then its parent (field 1.3), and so on, as long as each is of type
     /// `kind`.
-    fn chain(&self, id: Option<u64>, kind: u32) -> Vec<Message<'p>> {
+    pub(super) fn chain(&self, id: Option<u64>, kind: u32) -> Vec<Message<'p>> {
         let mut out = Vec::new();
         let mut seen = HashSet::new();
         let mut next = id;
@@ -78,13 +87,25 @@ impl<'p> Styles<'p> {
         self.paras.insert(id, props.clone());
         props
     }
+
+    /// The columns of column style `id` and its parents (text.md, "Runs", field 12): the number
+    /// of columns in 11.7.1.1 and the gap between them in 11.7.1.2, as a fraction of the width of
+    /// the text area. `None` when no style in the chain sets them.
+    pub(super) fn columns(&self, id: Option<u64>) -> Option<(u32, f32)> {
+        first(&self.chain(id, COLUMN_STYLE), 11, 7, |g| {
+            let c = g.message(7)?.message(1)?;
+            let count = c.varint(1).filter(|n| (1..=MAX_COLUMNS).contains(n))?;
+            let gap = c.float(2).filter(|f| f.is_finite() && (0.0..1.0).contains(f)).unwrap_or(0.0);
+            Some((u32::try_from(count).ok()?, gap))
+        })
+    }
 }
 
 /// Property `field` of property group `group` (11 character, 12 paragraph), from the first
 /// style in `chain` that sets it, read by `read`.
 /// A value `read` refuses (out of range, the wrong type) counts as not set, so the style's parent
 /// decides.
-fn first<'p, T>(chain: &[Message<'p>], group: u32, field: u32, read: impl Fn(Message<'p>) -> Option<T>) -> Option<T> {
+pub(super) fn first<'p, T>(chain: &[Message<'p>], group: u32, field: u32, read: impl Fn(Message<'p>) -> Option<T>) -> Option<T> {
     chain.iter().filter_map(|s| s.message(group)).filter(|g| g.has(field)).find_map(read)
 }
 
@@ -138,7 +159,7 @@ fn colour(chain: &[Message<'_>]) -> Option<Rgb> {
 
 /// A colour message: model in field 1 (1 = RGB), red, green, blue and alpha in 3 to 6 as floats
 /// from 0 to 1, and the colour space in 12 (1 or absent sRGB, 2 Display P3).
-fn rgb(c: Message<'_>) -> Option<Rgb> {
+pub(super) fn rgb(c: Message<'_>) -> Option<Rgb> {
     if c.varint(1).is_some_and(|m| m != 1) {
         return None;
     }
@@ -216,8 +237,44 @@ fn resolve_para(chain: &[Message<'_>]) -> ParaProps {
         space_before: Some(length(chain, 12, 21).unwrap_or(0.0).max(0.0)),
         line_spacing: Some(first(chain, 12, 13, |g| g.message(13)).and_then(line_spacing).unwrap_or(LineSpacing::Multiple(1.0))),
         tabs: first(chain, 12, 25, |g| g.message(25)).map(tabs),
+        borders: borders(chain),
         ..ParaProps::default()
     }
+}
+
+/// A paragraph's border (styles.md, "Paragraph properties"): property 15 says which edges Pages
+/// draws (1 a line above, 2 a line below, 4 a box), and 32 is the line, a stroke laid out as a
+/// shape's is. Pages ignores property 45, the edges as bits, so it isn't read.
+fn borders(chain: &[Message<'_>]) -> Option<Borders> {
+    let edges = first(chain, 12, 15, |g| g.varint(15))?;
+    let line = first(chain, 12, 32, |g| g.message(32)).and_then(stroke)?;
+    match edges {
+        1 => Some(Borders { top: Some(line), ..Borders::default() }),
+        2 => Some(Borders { bottom: Some(line), ..Borders::default() }),
+        4 => Some(Borders::box_(line)),
+        _ => None,
+    }
+}
+
+/// A stroke as a border line: its colour in field 1, its width in points in 2, and its pattern
+/// in 6, whose kind (6.1) is 1 for a solid line, 2 for none and 0 for dashes, the lengths of
+/// which are in 6.4 as multiples of the width (drawables.md). A dash no longer than the line is
+/// wide is drawn as dots.
+fn stroke(m: Message<'_>) -> Option<Border> {
+    let width = m.float(2).filter(|w| w.is_finite() && *w > 0.0 && *w <= MAX_BORDER_WIDTH)?;
+    let pattern = m.message(6);
+    let style = match pattern.and_then(|p| p.varint(1)) {
+        Some(2) => return None,
+        Some(0) => {
+            let dash = pattern.and_then(|p| p.all(4).next()).and_then(|v| match v {
+                crate::wire::Value::Fixed32(bits) => Some(f32::from_bits(bits)),
+                _ => None,
+            });
+            if dash.is_some_and(|d| d.is_finite() && d <= 1.0) { BorderStyle::Dotted } else { BorderStyle::Dashed }
+        }
+        _ => BorderStyle::Single,
+    };
+    Some(Border { style, width, color: m.message(1).and_then(rgb), space: BORDER_OFFSET })
 }
 
 /// Line spacing: field 1 the kind (absent or 0 a multiple of lines, 1 at least, 2 exactly,
