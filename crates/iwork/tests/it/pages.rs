@@ -1,6 +1,6 @@
 use craft_iwork::Error;
 use craft_iwork::pages::{Imported, import};
-use craft_wordmodel::para::{Anchor, Wrap};
+use craft_wordmodel::para::{Anchor, Wrap, WrapText};
 use craft_wordmodel::para::{COLUMN_BREAK, LINE_BREAK};
 use craft_wordmodel::props::{LineSpacing, VertAlign};
 use craft_wordmodel::section::SectionStart;
@@ -191,10 +191,16 @@ fn colour(r: f32, g: f32, b: f32) -> Msg {
     Msg::new().varint(1, 1).float(3, r).float(4, g).float(5, b).float(6, 1.0)
 }
 
-/// An image record (type 3005): its box at `(x, y)`, 40 by 20 points, and the data ID of its file.
-fn image(data: u64, x: f32, y: f32) -> Msg {
+/// An image record (type 3005): its box at `(x, y)`, 40 by 20 points, the data ID of its file,
+/// and its text wrap (drawable field 1.3), if any.
+fn image(data: u64, x: f32, y: f32, wrap: Option<Msg>) -> Msg {
     let geometry = Msg::new().msg(1, Msg::new().float(1, x).float(2, y)).msg(2, Msg::new().float(1, 40.0).float(2, 20.0)).varint(3, 3);
-    Msg::new().msg(1, Msg::new().msg(1, geometry)).reference(11, data)
+    let drawable = Msg::new().msg(1, geometry);
+    let drawable = match wrap {
+        Some(w) => drawable.msg(3, w),
+        None => drawable,
+    };
+    Msg::new().msg(1, drawable).reference(11, data)
 }
 
 /// A Pages package of `records` (a root, the body and its style come first), with a metadata
@@ -212,26 +218,37 @@ fn with_data(root: Record, body: Msg, records: Vec<Record>, files: &[(u64, &str,
 }
 
 #[test]
-fn pictures_on_the_page_float_where_they_are_placed_and_one_in_the_text_stays_in_the_line() {
+fn pictures_are_placed_on_their_page_or_in_the_text_as_their_wrap_says() {
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\nnot really pixels";
     const HEIC: &[u8] = b"\0\0\0\x18ftypheic not drawn";
-    // The page lists, back to front: a picture, the body, a masked picture and one in a format
-    // the model doesn't draw. The text holds a fourth at its U+FFFC.
-    let page = record(500, 10015, Msg::new().reference(1, 600).reference(1, BODY).reference(1, 601).reference(1, 602));
+    // Drawn back to front: a picture behind the text, the body, a masked picture and one in a
+    // format the model doesn't draw, all on page 1; one on page 3; one moving with the text;
+    // and one listed here alone, which Pages doesn't draw.
+    let stacking = [600, BODY, 601, 602, 604, 605, 606].iter().fold(Msg::new(), |m, id| m.reference(1, *id));
+    let on = |page: u64, ids: &[u64]| ids.iter().fold(Msg::new().varint(1, page), |m, id| m.msg(4, Msg::new().reference(1, *id)));
+    let pages = Msg::new().msg(1, on(0, &[600, 601, 602])).msg(1, on(2, &[604]));
     let mask_geometry = Msg::new().msg(1, Msg::new().float(1, 10.0).float(2, 5.0)).msg(2, Msg::new().float(1, 1.0).float(2, 1.0));
     let mask =
         Msg::new().msg(1, Msg::new().msg(1, mask_geometry)).msg(2, Msg::new().msg(5, Msg::new().msg(2, Msg::new().float(1, 20.0).float(2, 10.0))));
+    let inline = Msg::new().varint(1, 0);
+    let around_left = Msg::new().varint(1, 1).varint(2, 0).float(4, 6.0);
     let records = vec![
-        page,
-        record(600, 3005, image(7, 100.0, 200.0)),
-        record(601, 3005, image(7, 300.0, 400.0).reference(5, 610)),
+        record(500, 10015, stacking),
+        record(501, 10010, pages),
+        record(600, 3005, image(7, 100.0, 200.0, None)),
+        record(601, 3005, image(7, 300.0, 400.0, None).reference(5, 610)),
         record(610, 3006, mask),
-        record(602, 3005, image(8, 50.0, 50.0)),
-        record(603, 3005, image(7, 0.0, 0.0)),
+        record(602, 3005, image(8, 50.0, 50.0, None)),
+        record(604, 3005, image(7, 70.0, 80.0, Some(Msg::new().varint(1, 2)))),
+        record(603, 3005, image(7, 0.0, 0.0, Some(inline))),
+        record(605, 3005, image(7, 0.0, 0.0, Some(around_left))),
+        record(606, 3005, image(7, 0.0, 0.0, None)),
         record(700, 2003, Msg::new().reference(1, 603)),
+        record(701, 2003, Msg::new().reference(1, 605).float(3, 15.0).float(5, 4.0)),
     ];
-    let body = body("a\u{FFFC}b", &[(0, Some(BODY_STYLE))], &[]).msg(9, crate::build::runs(&[(1, Some(700))]));
-    let doc = with_data(root_and(Msg::new().reference(20, 500)), body, records, &[(7, "p-7.png", PNG), (8, "p-8.heic", HEIC)]);
+    let body = body("a\u{FFFC}b\u{FFFC}", &[(0, Some(BODY_STYLE))], &[]).msg(9, crate::build::runs(&[(1, Some(700)), (3, Some(701))]));
+    let root = root_and(Msg::new().reference(3, 501).reference(20, 500));
+    let doc = with_data(root, body, records, &[(7, "p-7.png", PNG), (8, "p-8.heic", HEIC)]);
     let imported = import(&doc).unwrap();
     let p = paragraphs(&imported)[0];
     let pictures: Vec<_> = p
@@ -242,18 +259,29 @@ fn pictures_on_the_page_float_where_they_are_placed_and_one_in_the_text_stays_in
             other => panic!("not a picture: {other:?}"),
         })
         .collect();
-    let [(first, _, _, behind, _), (second, mw, mh, front, crop), (third, iw, ih, in_text, _)] = &pictures[..] else { panic!("{pictures:?}") };
-    // Behind the text, where it was put on the page; in front, wrapped around, clipped to the
-    // mask's box where the mask is.
-    assert_eq!((behind.wrap, behind.h_rel, behind.v_rel, behind.x, behind.y), (Wrap::BehindText, Anchor::Page, Anchor::Page, 100.0, 200.0));
-    assert_eq!((front.wrap, front.x, front.y, *mw, *mh), (Wrap::Square, 310.0, 405.0, 20.0, 10.0));
+    // Placed on the pages first, back to front, then those in the text in text order.
+    let [(file, ..), (_, mw, mh, front, crop), (_, _, _, third_page, _), (_, iw, ih, in_line, _), (_, _, _, moving, _)] = &pictures[..] else {
+        panic!("{pictures:?}")
+    };
+    let behind = &pictures[0].3;
+    // Behind the text where it was put on page 1; in front, wrapped around, clipped to its mask.
+    assert_eq!(
+        (behind.wrap, behind.h_rel, behind.v_rel, behind.x, behind.y, behind.page),
+        (Wrap::BehindText, Anchor::Page, Anchor::Page, 100.0, 200.0, 1)
+    );
+    assert_eq!((front.wrap, front.x, front.y, *mw, *mh, front.page), (Wrap::Square, 310.0, 405.0, 20.0, 10.0, 1));
     assert!(crop.iter().all(|c| *c > 0.0 && *c < 1.0), "{crop:?}");
     assert!(front.z > behind.z);
-    // In the text: in the line, at its size.
-    assert_eq!((in_text.wrap, *iw, *ih), (Wrap::Inline, 40.0, 20.0));
-    // One file, stored once; the HEIC picture is left out and counted.
-    assert!(first == second && second == third);
-    assert_eq!(imported.document.media.get(first).map(|b| b.as_slice()), Some(PNG));
+    // On page 3, at its place there, with text above and below it.
+    assert_eq!((third_page.page, third_page.v_rel, third_page.x, third_page.y, third_page.wrap), (3, Anchor::Page, 70.0, 80.0, Wrap::TopAndBottom));
+    // In the text: wrap 0 in the line, at its size; otherwise floating from its anchor.
+    assert_eq!((in_line.wrap, *iw, *ih), (Wrap::Inline, 40.0, 20.0));
+    assert_eq!((moving.h_rel, moving.v_rel, moving.x, moving.y), (Anchor::Column, Anchor::Line, 15.0, 4.0));
+    assert_eq!((moving.wrap, moving.wrap_text, moving.dist), (Wrap::Square, WrapText::Left, 6.0));
+    // One file, stored once; the HEIC picture is left out and counted, the one Pages doesn't
+    // draw isn't.
+    assert!(pictures.iter().all(|(media, ..)| media == file));
+    assert_eq!(imported.document.media.get(file).map(|b| b.as_slice()), Some(PNG));
     assert_eq!(imported.report.objects, 1);
 }
 

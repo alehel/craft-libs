@@ -23,7 +23,7 @@ fn one_run(id: u64) -> Msg {
 /// The decoded records of a small valid document, to damage: a picture on the page, one in the
 /// text, a link, a bookmark, columns, a drop cap, a border and a page colour.
 fn sample() -> Vec<u8> {
-    let root = Msg::new().reference(4, 100).float(30, 595.0).float(31, 842.0).reference(20, 500);
+    let root = Msg::new().reference(4, 100).float(30, 595.0).float(31, 842.0).reference(20, 500).reference(3, 501);
     let body = Msg::new()
         .varint(1, 0)
         .text(3, "one\ntwo \u{FFFC}")
@@ -39,7 +39,8 @@ fn sample() -> Vec<u8> {
     let style = Msg::new().msg(1, Msg::new().reference(3, 200)).msg(11, Msg::new().varint(1, 1)).msg(12, Msg::new().varint(15, 4).msg(32, line));
     let box_at =
         |x: f32, w: f32| Msg::new().msg(1, Msg::new().float(1, x).float(2, x)).msg(2, Msg::new().float(1, w).float(2, w)).varint(3, 7).float(4, 30.0);
-    let image = Msg::new().msg(1, Msg::new().msg(1, box_at(10.0, 40.0))).reference(11, 7).reference(5, 610).reference(3, 620);
+    let wrap = Msg::new().varint(1, 1).varint(2, 0).varint(3, 1).float(4, 12.0).float(5, 0.5);
+    let image = Msg::new().msg(1, Msg::new().msg(1, box_at(10.0, 40.0)).msg(3, wrap)).reference(11, 7).reference(5, 610).reference(3, 620);
     let mask =
         Msg::new().msg(1, Msg::new().msg(1, box_at(5.0, 1.0))).msg(2, Msg::new().msg(5, Msg::new().msg(2, Msg::new().float(1, 20.0).float(2, 20.0))));
     let colour = Msg::new().varint(1, 1).float(3, 0.2).float(4, 0.4).float(5, 0.6).float(6, 1.0);
@@ -47,12 +48,13 @@ fn sample() -> Vec<u8> {
         record(1, 10000, root),
         record(100, 2001, body),
         record(200, 2022, style),
-        record(500, 10015, Msg::new().reference(1, 600).reference(1, 100)),
+        record(500, 10015, Msg::new().reference(1, 600).reference(1, 100).reference(1, 601)),
+        record(501, 10010, Msg::new().msg(1, Msg::new().varint(1, 3).msg(4, Msg::new().reference(1, 600)))),
         record(600, 3005, image.clone()),
         record(601, 3005, image),
         record(610, 3006, mask),
         record(620, 3016, Msg::new().msg(1, Msg::new().reference(3, 620)).msg(11, Msg::new().float(2, 0.5))),
-        record(700, 2003, Msg::new().reference(1, 601)),
+        record(700, 2003, Msg::new().reference(1, 601).float(3, 15.0).float(5, 4.0)),
         record(800, 2032, Msg::new().text(2, "https://example.com/")),
         record(900, 2035, Msg::new().msg(1, Msg::new().text(1, "B"))),
         record(

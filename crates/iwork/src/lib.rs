@@ -2,7 +2,7 @@
 //!
 //! Written from the open iwork-format specification, which is built from black-box experiments
 //! (<https://alehel.github.io/iwork-format/>, source <https://github.com/alehel/iwork-format> at
-//! commit `16c8f89`, CC-BY-4.0), and from the public Snappy and Protocol Buffers format
+//! commit `57b31c5`, CC-BY-4.0), and from the public Snappy and Protocol Buffers format
 //! descriptions. It implements:
 //!
 //! - container.md: "The package" (ZIP files, and the folder form zipped whole with its
@@ -15,7 +15,8 @@
 //!   columns, sections, drop caps, tracked deletions); styles.md "Character properties",
 //!   "Paragraph properties" (borders among them), "Named and unnamed styles" and "Finding a
 //!   character's formatting"; pages.md "Page setup" and the sections' page colour; drawables.md
-//!   "On the page or in the text", "Geometry" and "Images".
+//!   "On the page or in the text", "Which page an object is on", "Move with Text", "Text wrap",
+//!   "Geometry" and "Images".
 //!
 //! Every file is treated as hostile: sizes are checked before anything is allocated, decoded
 //! bytes and records are counted against [`Limits`], and nothing panics. A part that is damaged

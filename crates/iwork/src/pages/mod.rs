@@ -6,8 +6,10 @@
 //! "The body text"). Its paragraphs, breaks and runs follow text.md; the formatting of each run
 //! is worked out from its character and paragraph styles as styles.md describes, and written
 //! on the run and paragraph as direct formatting, paragraph borders and drop caps among it.
-//! Named styles aren't carried over as styles. Pictures in the text and on the first page come
-//! from the package's `Data/` files (drawables.md, container.md "Data files").
+//! Named styles aren't carried over as styles. Pictures in the text and on the pages come from
+//! the package's `Data/` files (drawables.md, container.md "Data files"); those placed on a page
+//! after the first carry their page in [`craft_wordmodel::para::Float::page`] and are anchored in
+//! the first paragraph, for the app to move to a paragraph on their page.
 //!
 //! What isn't read yet is left out and counted in the [`Report`], so a caller can say so:
 //! other objects in the text and on the page (tables, shapes, text boxes, charts, page number
@@ -39,8 +41,8 @@ const SECTIONS: u32 = 17;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Report {
     /// Objects in the body text or on the page: tables, shapes, text boxes, charts, fields such
-    /// as page numbers, tables of contents, pictures whose file is missing or in a format the
-    /// model doesn't draw, and objects on the page after the first. Each is left out.
+    /// as page numbers, tables of contents, and pictures whose file is missing or in a format
+    /// the model doesn't draw. Each is left out.
     pub objects: usize,
     /// Footnotes, left out with their marks.
     pub footnotes: usize,
@@ -89,9 +91,9 @@ pub fn from_package(pkg: &Package, data: &mut DataFiles<'_>) -> Result<Imported,
     let page = page_setup(pkg);
     let mut report = Report::default();
     let mut document = Document::new();
-    let mut pictures = drawables::Pictures::new(pkg, data);
+    let mut pictures = drawables::Pictures::new(pkg, data, body.id);
     let (mut paragraphs, last_section) = text::paragraphs(pkg, body.payload, &page, &mut report, &mut document, &mut pictures);
-    let (on_page, left_out) = pictures.on_page(&mut document, &styles::Styles::new(pkg), body.id);
+    let (on_page, left_out) = pictures.on_page(&mut document, &styles::Styles::new(pkg));
     report.objects += left_out;
     if let Some(first) = paragraphs.first_mut() {
         anchor(first, on_page);
@@ -112,7 +114,7 @@ pub fn from_package(pkg: &Package, data: &mut DataFiles<'_>) -> Result<Imported,
     Ok(Imported { document, report })
 }
 
-/// Put the objects on the first page in the first paragraph, after its first character when it
+/// Put the objects placed on the pages in the first paragraph, after its first character when it
 /// has a drop cap (which takes that character).
 fn anchor(first: &mut craft_wordmodel::Paragraph, objects: Vec<craft_wordmodel::InlineObject>) {
     let mut at = if first.props.drop_cap.is_some() { first.text.chars().next().map_or(0, char::len_utf8) } else { 0 };
